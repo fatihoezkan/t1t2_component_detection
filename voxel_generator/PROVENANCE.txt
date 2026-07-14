@@ -1,0 +1,9 @@
+Vendored snapshot of the voxel_simulator data generator.
+
+upstream path : voxel_simulator/voxel_generator/
+upstream commit: 512fc6600c5167227a67af9898f997835db26774 (512fc66, 2026-07-08 "clean 2")
+copied on     : 2026-07-09
+excluded       : .git/, output/, notebooks/, __pycache__/, .pytest_cache/, .DS_Store
+
+This is a pinned, read-only copy so t1t2_training/ is self-contained and reproducible.
+Do NOT edit here — change the upstream generator, then re-vendor and update this file.

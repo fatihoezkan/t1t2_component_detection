@@ -1,0 +1,10 @@
+# Generated data and run artifacts are large and reproducible — don't track them.
+data/
+results/
+# Python noise
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+# The vendored generator's own outputs, if any get created here
+voxel_generator/output/

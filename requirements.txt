@@ -1,0 +1,10 @@
+# Runtime deps for the t1t2_training package (model/loss/data) + the vendored generator.
+# Torch is pinned loosely; on the cluster install the CUDA build that matches the driver.
+torch>=2.2
+numpy>=1.24
+pandas>=2.0
+pyarrow>=12.0
+scipy>=1.10
+pyyaml>=6.0
+matplotlib>=3.7
+pytest>=7.0
