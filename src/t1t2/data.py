@@ -1,10 +1,13 @@
 """From voxel_generator Parquet files to the exact tensors the model consumes.
 
-The generator writes one voxel per row: the 64-point signal (S_1..S_64), up to three
-compartments (T1_i, T2_i, w_i, NaN-padded when a voxel has fewer), and n_comp. Training,
+The generator writes one voxel per row: the 64-point signal (S_1..S_64), a fixed number of
+compartment slots (T1_i, T2_i, w_i, NaN-padded when a voxel has fewer), and n_comp. Training,
 on the other hand, wants three tensors per batch — the input signal, a flat target vector,
-and the compartment count. This module is the glue, and it holds two decisions that are
+and the compartment count. This module is the glue, and it holds three decisions that are
 easy to get subtly wrong:
+
+0.  The number of compartment slots is **read off the columns**, never configured. See
+    `infer_max_comp` for why a config field for this was actively dangerous.
 
 1.  Relaxation times are mapped into [0, 1] before the model sees them, because the model's
     T1/T2/weight heads end in a sigmoid and can only ever emit [0, 1]. `TargetNormalizer`
@@ -19,6 +22,9 @@ The untouched millisecond targets are kept on the dataset object too, so evaluat
 report real-unit errors ("40 ms" means something; "0.03" doesn't).
 """
 from __future__ import annotations
+
+import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -114,22 +120,87 @@ def _apply_signal_norm(X: np.ndarray, mode: str) -> np.ndarray:
     raise ValueError(f"unknown signal_norm {mode!r}; expected none|max|first")
 
 
+def infer_max_comp(df: pd.DataFrame) -> int:
+    """Read the ground-truth table width straight off the columns.
+
+    The width used to be a config field, which meant a stale `max_comp: 3` against 4-compartment
+    data trained a silently broken model: the Hungarian cost matrix is built at the config width,
+    and numpy is happy to slice 4 columns out of a 3-column array and return 3. No error, no
+    warning, just a model that structurally cannot count past 3 — reporting plausible metrics.
+    Deriving the width from the data removes that failure mode instead of guarding against it.
+    """
+    idx = {}
+    for fam in ("T1", "T2", "w"):
+        found = sorted(
+            int(m.group(1))
+            for m in (re.fullmatch(rf"{fam}_(\d+)", c) for c in df.columns)
+            if m
+        )
+        if not found:
+            raise ValueError(f"no {fam}_* ground-truth columns found; is this a voxel dataset?")
+        idx[fam] = found
+
+    if not (idx["T1"] == idx["T2"] == idx["w"]):
+        raise ValueError(
+            f"T1/T2/w column families disagree: T1{idx['T1']}, T2{idx['T2']}, w{idx['w']}. "
+            "They must share identical indices."
+        )
+    k = len(idx["T1"])
+    if idx["T1"] != list(range(1, k + 1)):
+        raise ValueError(f"ground-truth columns must be contiguous 1..K; got {idx['T1']}")
+    return k
+
+
+def _read_frames(paths, limit: int | None) -> pd.DataFrame:
+    """Read one or more parquet files into a single frame, checking they agree on schema.
+
+    `limit` is a *total* across the paths, split evenly — a plain head-slice would take the whole
+    budget from the first file, which with per-n files means a smoke run that only ever sees
+    single-compartment voxels.
+    """
+    paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
+    if not paths:
+        raise ValueError("no dataset path given")
+
+    per, extra = (None, 0) if limit is None else divmod(limit, len(paths))
+    frames = []
+    for i, p in enumerate(paths):
+        df = pd.read_parquet(p)
+        if limit is not None:
+            take = per + (1 if i < extra else 0)
+            df = df.iloc[:take]
+        frames.append(df.reset_index(drop=True))
+
+    cols = frames[0].columns
+    for p, df in zip(paths[1:], frames[1:]):
+        if not df.columns.equals(cols):
+            raise ValueError(f"{p} has a different schema from {paths[0]}; cannot combine them.")
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
 class VoxelDataset(Dataset):
-    """One Parquet split loaded fully into memory as tensors.
+    """One or more Parquet splits loaded fully into memory as tensors.
 
     Loaded eagerly rather than streamed per-item — the files fit in RAM and it keeps the
-    training loop fast. `limit` grabs just the first few hundred voxels for tests and smoke
-    runs without needing a separate tiny file.
+    training loop fast. `limit` grabs just a few hundred voxels for tests and smoke runs without
+    needing a separate tiny file. Pass a list of paths to combine the per-n files into one
+    dataset; they must share a schema (the generator writes a fixed width for exactly this).
     """
 
     def __init__(self, path, cfg, normalizer: TargetNormalizer | None = None, limit: int | None = None):
         self.cfg = cfg
         self.normalizer = normalizer or TargetNormalizer.from_config(cfg)
-        n_in, max_c = cfg.n_inputs, cfg.max_comp
+        n_in = cfg.n_inputs
 
-        df = pd.read_parquet(path)
-        if limit is not None:
-            df = df.iloc[:limit].reset_index(drop=True)
+        df = _read_frames(path, limit)
+        max_c = self.max_comp = infer_max_comp(df)
+
+        observed = int(df["n_comp"].max()) if len(df) else 0
+        if observed > max_c:
+            raise ValueError(
+                f"data has n_comp up to {observed} but only {max_c} ground-truth column slots; "
+                "the loss would silently supervise only the first slots."
+            )
 
         # --- input signal ---
         # copy=True because pandas can hand back a read-only view, and torch.from_numpy on a

@@ -23,24 +23,34 @@ import yaml
 class DataConfig:
     """Where the data lives and how it is transformed on the way into the model."""
 
-    train_path: str
-    val_path: Optional[str] = None
-    test_path: Optional[str] = None
+    # A single parquet path, or a list of them to combine (e.g. the per-n files n1..n4).
+    train_path: str | list[str]
+    val_path: Optional[str | list[str]] = None
+    test_path: Optional[str | list[str]] = None
 
     n_inputs: int = 64            # the fixed thesis setting: 8 TI × 8 TE, in scanner order
-    max_comp: int = 3             # widest a voxel's compartment table ever gets
+
+    # Cap the TRAIN voxels taken from each path — the data-scaling ablation's knob. Validation
+    # and test are deliberately untouched so every arm is scored on the same set.
+    train_limit_per_path: Optional[int] = None
+
+    # There is deliberately no `max_comp` here: the compartment-table width is read off the
+    # data's columns (data.py:infer_max_comp). A config copy of it could go stale against the
+    # data and silently train a model that cannot count past the configured width.
 
     # How T1/T2 (ms) map into the model's [0, 1] output range (see data.py for why log is the
-    # default). Bounds are the physical window we expect; targets outside get clamped.
+    # default). Bounds must match the generator's sampling ranges, or the normalizer clamps real
+    # targets and the model can never reach the edges of the space it is asked to predict.
     normalization: str = "log_minmax"     # identity | linear_minmax | log_minmax
-    t1_min: float = 100.0
-    t1_max: float = 7000.0
+    t1_min: float = 50.0
+    t1_max: float = 4000.0
     t2_min: float = 5.0
-    t2_max: float = 4000.0
+    t2_max: float = 3000.0
 
-    # Per-voxel input rescaling (none | max | first). Real scans arrive at an arbitrary
-    # overall scale, so this must be applied identically to synthetic and real data later.
-    signal_norm: str = "none"
+    # Per-voxel input rescaling (none | max | first). Real scans arrive at an arbitrary overall
+    # scale, so this must be applied identically to synthetic and real data. "max" also divides
+    # out M0, which is unidentifiable anyway since the weights sum to 1.
+    signal_norm: str = "max"
 
 
 @dataclass
@@ -84,16 +94,30 @@ class LossConfig:
 class TrainConfig:
     """The optimization schedule and run mechanics."""
 
+    # An upper bound, not a target: early stopping decides when the run actually ends.
     epochs: int = 200
     batch_size: int = 256
+
+    # Constant LR. There was a StepLR(step_size=1000) here, which with a 200-epoch budget never
+    # fired once — dead code that looked like a schedule. The first baseline stays deliberately
+    # plain; a constant LR is also the least confounding choice for the data-scaling ablation,
+    # whose arms differ ~20x in optimizer steps per epoch.
     lr: float = 1.0e-4
-    lr_step: int = 1000
     weight_decay: float = 1.0e-4
     opt_betas: tuple = (0.9, 0.98)
+
+    # Stop once validation stops improving. Needs a validation split; without one both the
+    # patience counter and best-model selection are meaningless and get disabled.
+    early_stopping: bool = True
+    early_stopping_patience: int = 10
+    early_stopping_min_delta: float = 1.0e-4
+
     device: Optional[str] = None      # None -> auto-detect (see device.py)
     seed: int = 0
     num_workers: int = 0
-    ckpt_every: int = 20              # epochs between checkpoints
+    # Every epoch by default: last.pt carries the history, so a sparser cadence silently drops
+    # the epochs since the last write whenever a run resumes.
+    ckpt_every: int = 1
 
 
 @dataclass

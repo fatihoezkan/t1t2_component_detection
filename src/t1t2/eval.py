@@ -16,6 +16,7 @@ neither drags down nor flatters the headline numbers. Predictions are a list of
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -84,16 +85,8 @@ def _median(a):
     return float(np.median(a)) if len(a) else float("nan")
 
 
-def compute_metrics(preds, trues):
-    """Score a whole split: counting, per-parameter error, and the CSF breakout.
-
-    Count accuracy is judged per voxel on the *number* of compartments — no matching needed,
-    just len(pred) vs len(true). Regression errors are gathered over matched pairs only, each T2
-    error filed into the CSF or non-CSF bucket by the true T2. Medians for the relative errors,
-    because a few badly-matched outliers would wreck a mean and misrepresent typical behaviour.
-    """
-    pc = np.array([len(p) for p in preds])
-    tc = np.array([len(t) for t in trues])
+def _regression_block(preds, trues, prefix=""):
+    """Matched-pair errors over whatever subset of voxels it is handed."""
     t1_rel, t2_rel, t1_abs, t2_abs, w_abs = [], [], [], [], []
     t2_rel_csf, t2_rel_noncsf = [], []
     for pred, true in zip(preds, trues):
@@ -106,18 +99,96 @@ def compute_metrics(preds, trues):
             w_abs.append(abs(p[2] - t[2]))
             (t2_rel_csf if t[1] > CSF_T2_MS else t2_rel_noncsf).append(rel2)
     return {
+        f"{prefix}n_matched": int(len(t1_rel)),
+        f"{prefix}t1_rel_median": _median(t1_rel),
+        f"{prefix}t2_rel_median": _median(t2_rel),
+        f"{prefix}t1_mae_ms": _median(t1_abs),
+        f"{prefix}t2_mae_ms": _median(t2_abs),
+        f"{prefix}w_mae": _median(w_abs),
+        f"{prefix}t2_rel_median_noncsf": _median(t2_rel_noncsf),
+        f"{prefix}t2_rel_median_csf": _median(t2_rel_csf),
+    }
+
+
+def count_confusion(preds, trues, n_queries=10):
+    """True count (rows) x predicted count (columns) — how it misses, not just how often.
+
+    Predicted counts run 0..n_queries because the model can keep any number of its queries, so
+    the table is deliberately not square. Under- and over-counting are different failures with
+    different causes, and a single accuracy number hides which one is happening.
+    """
+    tc = np.array([len(t) for t in trues], dtype=int)
+    pc = np.array([len(p) for p in preds], dtype=int)
+    rows = sorted(set(tc.tolist()))
+    mat = {}
+    for r in rows:
+        counts = np.bincount(pc[tc == r], minlength=n_queries + 1)[: n_queries + 1]
+        mat[str(r)] = [int(c) for c in counts]
+    return {"true_counts": rows, "predicted_range": [0, n_queries], "matrix": mat}
+
+
+def physics_violations(preds):
+    """Do the predictions obey the physics the data was built from?
+
+    The heads are independent sigmoids, so nothing stops the model emitting T2 >= T1 or weights
+    that miss 1. Neither is post-processed away, so measuring them says whether the model has
+    actually learned the structure of the problem or is just fitting numbers. This is the
+    concrete form of "outputs make physical sense".
+    """
+    viol, wsum = [], []
+    for pred in preds:
+        if not pred:
+            continue
+        viol.extend(1.0 if p[1] >= p[0] else 0.0 for p in pred)
+        wsum.append(abs(sum(p[2] for p in pred) - 1.0))
+    return {
+        "t2_ge_t1_rate": float(np.mean(viol)) if viol else float("nan"),
+        "weight_sum_dev_median": _median(wsum),
+        "weight_sum_dev_mean": float(np.mean(wsum)) if wsum else float("nan"),
+    }
+
+
+def compute_metrics(preds, trues, n_queries=10):
+    """Score a whole split: counting, per-parameter error, per-n, physics, CSF breakout.
+
+    Count accuracy is judged per voxel on the *number* of compartments — no matching needed,
+    just len(pred) vs len(true). Regression errors are gathered over matched pairs only, each T2
+    error filed into the CSF or non-CSF bucket by the true T2. Medians for the relative errors,
+    because a few badly-matched outliers would wreck a mean and misrepresent typical behaviour.
+
+    Per-n metrics are not optional decoration. The data is uniform over n_comp=1..4, and the
+    smallest compartment of a 4-compartment voxel sits below the noise floor in most voxels at
+    low SNR — so an aggregate averages an easy regime with a near-impossible one and describes
+    neither. Any claim about quality has to be read per-n.
+    """
+    pc = np.array([len(p) for p in preds])
+    tc = np.array([len(t) for t in trues])
+
+    m = {
         "n_voxels": int(len(preds)),
-        "n_matched": int(len(t1_rel)),
         "count_accuracy": float((pc == tc).mean()) if len(pc) else float("nan"),
         "count_mae": float(np.abs(pc - tc).mean()) if len(pc) else float("nan"),
-        "t1_rel_median": _median(t1_rel),
-        "t2_rel_median": _median(t2_rel),
-        "t1_mae_ms": _median(t1_abs),
-        "t2_mae_ms": _median(t2_abs),
-        "w_mae": _median(w_abs),
-        "t2_rel_median_noncsf": _median(t2_rel_noncsf),
-        "t2_rel_median_csf": _median(t2_rel_csf),
     }
+    m |= _regression_block(preds, trues)
+
+    # Restricted to voxels whose count is right. An undercounting model only ever reports the
+    # compartments it did find, which flatters its matched errors; this brackets that bias from
+    # the other side. It is conditioned on success, so it is NOT a random-voxel estimate.
+    ok = [i for i in range(len(preds)) if len(preds[i]) == len(trues[i])]
+    m |= _regression_block([preds[i] for i in ok], [trues[i] for i in ok], prefix="cc_")
+    m["cc_n_voxels"] = len(ok)
+
+    for k in sorted(set(tc.tolist())):
+        idx = np.flatnonzero(tc == k)
+        m[f"count_accuracy_n{k}"] = float((pc[idx] == k).mean())
+        m[f"count_mae_n{k}"] = float(np.abs(pc[idx] - k).mean())
+        m[f"n_voxels_n{k}"] = int(len(idx))
+        sub = _regression_block([preds[i] for i in idx], [trues[i] for i in idx], prefix=f"n{k}_")
+        m |= {key: sub[key] for key in (f"n{k}_t1_rel_median", f"n{k}_t2_rel_median", f"n{k}_w_mae")}
+
+    m["confusion"] = count_confusion(preds, trues, n_queries)
+    m |= physics_violations(preds)
+    return m
 
 
 def scatter_figure(preds, trues, path, title=""):
@@ -158,13 +229,56 @@ def scatter_figure(preds, trues, path, title=""):
     return str(path)
 
 
-def evaluate_detr(model, ds, device, normalizer, results_dir, exist_thresh=0.5, tag="detr"):
-    """End-to-end for the model: predict, score, drop metrics + figure into results_dir."""
+def evaluate_detr(model, ds, device, normalizer, results_dir, exist_thresh=0.5, tag="detr",
+                  n_queries=10):
+    """End-to-end for the model: predict, score, drop metrics + figure into results_dir.
+
+    exist_thresh stays at its default. Tuning it on the split being reported would be scoring
+    the model on data it was tuned against; if the count looks miscalibrated, sweep it on
+    validation and freeze the choice before test is opened.
+    """
     preds = detr_predictions(model, ds, device, normalizer, exist_thresh)
     trues = true_compartments(ds)
-    metrics = compute_metrics(preds, trues)
+    metrics = compute_metrics(preds, trues, n_queries=n_queries)
+    metrics["exist_thresh"] = exist_thresh
     _save(metrics, preds, trues, results_dir, tag)
     return metrics
+
+
+def evaluate_snr_ladder(model, paths, cfg, device, normalizer, results_dir, train_snr_min=None,
+                        exist_thresh=0.5, n_queries=10, limit=None):
+    """Score each fixed-SNR rung separately: performance as a function of noise.
+
+    The rungs are generated as a paired set — same voxels, same standardized noise, only the
+    amplitude differs — so differences across rungs are the SNR effect and not sampling noise.
+
+    `paths` maps a label to the parquet path(s) for that rung. Rungs below the training SNR
+    range are flagged `extrapolation`: they are a robustness probe, and folding them into
+    in-distribution numbers would misreport both.
+    """
+    from .data import VoxelDataset
+
+    out = {}
+    for label, path in paths.items():
+        ds = VoxelDataset(path, cfg, normalizer, limit=limit)
+        preds = detr_predictions(model, ds, device, normalizer, exist_thresh)
+        m = compute_metrics(preds, true_compartments(ds), n_queries=n_queries)
+        snr = _snr_of(label)
+        m["snr"] = snr
+        m["extrapolation"] = bool(train_snr_min is not None and snr is not None and snr < train_snr_min)
+        out[label] = m
+
+    rd = Path(results_dir)
+    rd.mkdir(parents=True, exist_ok=True)
+    with open(rd / "metrics_snr_ladder.json", "w") as f:
+        json.dump(out, f, indent=2)
+    return out
+
+
+def _snr_of(label):
+    """Pull the SNR out of a rung label like 'test_snr20'."""
+    m = re.search(r"snr(\d+)", str(label))
+    return float(m.group(1)) if m else None
 
 
 def _save(metrics, preds, trues, results_dir, tag):

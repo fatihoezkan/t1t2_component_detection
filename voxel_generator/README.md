@@ -18,7 +18,7 @@ weights (min 5 %), and a signed 64-point Gaussian-noisy signal.
 
 **CLI — build the whole train/val/test + noise-ladder family:**
 ```bash
-python run_generator.py --out-dir output/data                    # full, SNR ∈ [20,150]
+python run_generator.py --out-dir output/data                    # full, train SNR ∈ [30,150]
 python run_generator.py --out-dir output/data --noise-sigma 0.1  # fixed absolute noise instead
 python run_generator.py --help                                   # every flag (sizes, ranges, ladders)
 ```

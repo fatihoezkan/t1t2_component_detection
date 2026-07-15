@@ -1,6 +1,8 @@
 # Generated data and run artifacts are large and reproducible — don't track them.
-data/
-results/
+# Root-anchored on purpose: a bare `data/` also matches voxel_generator/data/, which holds
+# ti_te_dict.mat — the acquisition protocol the code cannot run without.
+/data/
+/results/
 # Python noise
 __pycache__/
 *.pyc

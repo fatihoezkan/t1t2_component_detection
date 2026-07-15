@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import load_config
 from .data import TargetNormalizer, VoxelDataset
 from .device import get_device
-from .eval import evaluate_detr
+from .eval import evaluate_detr, evaluate_snr_ladder
 from .train import train
 
 
@@ -28,8 +28,22 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
     history, results_dir, model = train(
         cfg, results_dir=results_dir, max_epochs=max_epochs, resume=resume, limit=limit, log=log,
     )
+    # train() hands back the best model, not the final epoch — nothing to reload here.
 
-    summary = {"name": cfg.name, "epochs_run": len(history)}
+    vals = [h["val"]["loss"] for h in history if h.get("val")]
+    best_epoch = min(range(len(vals)), key=lambda i: vals[i]) if vals else None
+    summary = {
+        "name": cfg.name,
+        "epochs_run": len(history),
+        "epoch_budget": max_epochs if max_epochs is not None else cfg.train.epochs,
+        "best_epoch": None if best_epoch is None else best_epoch + 1,
+        "best_val": None if best_epoch is None else vals[best_epoch],
+        "early_stopped": len(history) < (max_epochs if max_epochs is not None else cfg.train.epochs),
+        # Reported alongside best_val because the data-scaling arms see very different numbers of
+        # updates per epoch; comparing them at equal epochs would compare different things.
+        "total_steps": history[-1].get("cum_steps") if history else 0,
+        "wall_seconds": round(sum(h.get("seconds", 0) for h in history), 1),
+    }
 
     # Evaluate on the test split (fall back to val, then train, whichever exists).
     test_path = cfg.data.test_path or cfg.data.val_path or cfg.data.train_path
@@ -38,12 +52,48 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
     device = get_device(cfg.train.device)
 
     log(f"[{cfg.name}] evaluating DETR on {test_path} ({len(test_ds)} voxels)")
-    summary["detr"] = evaluate_detr(model, test_ds, device, normalizer, results_dir)
+    summary["detr"] = evaluate_detr(model, test_ds, device, normalizer, results_dir,
+                                    n_queries=cfg.model.n_queries)
+
+    # Per-SNR, if the fixed-SNR rungs sit next to the test files. They are a paired set (same
+    # voxels, same noise pattern, only the amplitude differs), so differences across rungs are
+    # the SNR effect rather than sampling variation.
+    ladder = _snr_ladder_paths(test_path)
+    if ladder:
+        log(f"[{cfg.name}] scoring the fixed-SNR ladder: {', '.join(sorted(ladder))}")
+        summary["snr_ladder"] = evaluate_snr_ladder(
+            model, ladder, cfg.data, device, normalizer, results_dir,
+            train_snr_min=_train_snr_min(cfg),
+            n_queries=cfg.model.n_queries, limit=limit,
+        )
 
     with open(Path(results_dir) / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     log(f"[{cfg.name}] done -> {results_dir}")
     return summary
+
+
+def _train_snr_min(cfg) -> float | None:
+    """The generator's lower training-SNR bound, used only to flag extrapolation rungs."""
+    try:
+        from voxel_simulator.sampler import SNR_MIN
+        return float(SNR_MIN)
+    except Exception:
+        return None
+
+
+def _snr_ladder_paths(test_path) -> dict:
+    """Find test_snr*.parquet siblings of the test split, grouped by rung.
+
+    Returns {rung_label: [path per compartment count]} so each rung is scored across all n at
+    once, mirroring how the test split itself is assembled.
+    """
+    paths = [test_path] if isinstance(test_path, str) else list(test_path)
+    ladder: dict[str, list[str]] = {}
+    for p in paths:
+        for rung in sorted(Path(p).parent.glob("test_snr*.parquet")):
+            ladder.setdefault(rung.stem, []).append(str(rung))
+    return ladder
 
 
 def main():

@@ -10,6 +10,13 @@ Two ways to set the noise level, and each function returns `(noisy_signal, sigma
   - **sigma** (absolute): pass `sigma=` directly (e.g. 0.1, 0.2). Since the clean signal has
     amplitude ~1 (M0=1), a direct sigma is the intuitive "how much noise" knob. When `sigma`
     is given it wins and `snr` is ignored.
+
+The noise is drawn as a **standardized** z and then scaled: `S_clean + sigma * z`. That split is
+load-bearing, not cosmetic — it is what lets the fixed-SNR ladder hand the same voxel the same z
+at every rung so that only the amplitude changes, making SNR the single controlled variable.
+Writing it as `rng.normal(0, sigma)` happens to produce the same numbers today, but only because
+of how NumPy internally scales a shared standard-normal draw; that is an implementation detail
+NumPy does not promise across versions, and the ladder's whole design would rest on it.
 """
 from __future__ import annotations
 
@@ -31,10 +38,14 @@ def add_gaussian_noise(signal_clean, snr, rng, sigma=None):
 
     Negatives stay negative (no rectification), which is right for real-valued data. Pass
     `sigma` to set the noise std directly (e.g. 0.1), otherwise it's derived from `snr`.
+
+    Draws a standardized z and scales it (see the module docstring): with the same `rng` state,
+    two different sigmas reuse the same z, which is exactly what the paired fixed-SNR ladder needs.
     """
     if sigma is None:
         sigma = _sigma_from_snr(signal_clean, snr)
-    signal_noisy = signal_clean + rng.normal(0.0, sigma, size=signal_clean.shape)
+    z = rng.standard_normal(signal_clean.shape)
+    signal_noisy = signal_clean + sigma * z
     return signal_noisy, sigma
 
 

@@ -21,16 +21,21 @@ from t1t2.physics import forward_numpy, forward_torch, load_protocol
 from t1t2.train import train
 
 ROOT = Path(__file__).resolve().parents[1]
-DEV = ROOT / "data" / "dev"
+DEV = ROOT / "data" / "dev_1to4"
+
+
+def _split(name: str) -> list[str]:
+    return [str(DEV / f"n{n}" / f"{name}.parquet") for n in range(1, 5)]
 
 
 def _cfg(**train_kw) -> ExperimentConfig:
+    train_kw.setdefault("early_stopping", False)     # most tests want a fixed epoch count
     return ExperimentConfig(
         name="pipe",
         data=DataConfig(
-            train_path=str(DEV / "train.parquet"),
-            val_path=str(DEV / "val.parquet"),
-            test_path=str(DEV / "test.parquet"),
+            train_path=_split("train"),
+            val_path=_split("val"),
+            test_path=_split("test"),
         ),
         model=ModelConfig(),
         loss=LossConfig(),
@@ -70,6 +75,75 @@ def test_train_smoke_and_resume(tmp_path):
     # resume: continue to epoch 4 from the checkpoint
     hist2, _, _ = train(cfg, results_dir=tmp_path / "run", max_epochs=4, limit=256, log=lambda *a: None)
     assert len(hist2) == 4
+    assert [h["epoch"] for h in hist2] == [0, 1, 2, 3]       # history not truncated by the resume
+
+
+def test_early_stopping_fires_and_returns_the_best_model(tmp_path):
+    """Early stopping must stop, and the returned model must be the best one — not the last.
+
+    Evaluating the final epoch was the old behaviour and it silently reports the wrong model
+    whenever the last epoch is not the best, which is most of the time.
+    """
+    cfg = _cfg(epochs=20, batch_size=128, ckpt_every=1,
+               early_stopping=True, early_stopping_patience=2,
+               early_stopping_min_delta=10.0)      # nothing counts as an improvement
+    hist, rd, model = train(cfg, results_dir=tmp_path / "run", limit=256, resume=False,
+                            log=lambda *a: None)
+
+    assert len(hist) == 3, f"expected 1 attempt + patience 2, got {len(hist)} epochs"
+    best = tmp_path / "run" / "checkpoints" / "best.pt"
+    assert best.exists()
+
+    saved = torch.load(best, map_location="cpu")["model"]
+    for k, v in model.state_dict().items():
+        assert torch.equal(saved[k], v.cpu()), f"returned model differs from best.pt at {k}"
+
+
+def test_early_stopping_needs_a_val_split(tmp_path):
+    """Without validation there is nothing to select on, so it must disable itself, not crash."""
+    cfg = _cfg(epochs=2, batch_size=128, early_stopping=True, early_stopping_patience=1)
+    cfg.data.val_path = None
+    hist, _, _ = train(cfg, results_dir=tmp_path / "run", limit=128, resume=False,
+                       log=lambda *a: None)
+    assert len(hist) == 2 and all(h["val"] == {} for h in hist)
+
+
+def test_resume_refuses_a_different_config(tmp_path):
+    """Checkpoints are keyed only by directory, so a changed config would blend two experiments."""
+    import pytest
+
+    cfg = _cfg(epochs=1, batch_size=128, ckpt_every=1)
+    train(cfg, results_dir=tmp_path / "run", limit=128, log=lambda *a: None)
+
+    changed = _cfg(epochs=1, batch_size=128, ckpt_every=1)
+    changed.model.n_queries = 12
+    with pytest.raises(ValueError, match="different config"):
+        train(changed, results_dir=tmp_path / "run", limit=128, log=lambda *a: None)
+
+
+def test_checkpoint_metadata_is_plain_python(tmp_path):
+    """torch>=2.6 loads with weights_only=True; a numpy scalar in here breaks resume on the
+    cluster and nowhere else."""
+    cfg = _cfg(epochs=1, batch_size=128, ckpt_every=1)
+    train(cfg, results_dir=tmp_path / "run", limit=128, log=lambda *a: None)
+    state = torch.load(tmp_path / "run" / "checkpoints" / "last.pt", map_location="cpu",
+                       weights_only=True)
+    assert type(state["best_val"]) is float
+    assert type(state["best_epoch"]) is int and type(state["bad_epochs"]) is int
+
+
+def test_train_limit_per_path_leaves_val_alone(tmp_path):
+    """The data-scaling arms must all be scored on the same validation set."""
+    from t1t2.data import VoxelDataset
+
+    cfg = _cfg(epochs=1, batch_size=64)
+    cfg.data.train_limit_per_path = 16
+    train(cfg, results_dir=tmp_path / "run", log=lambda *a: None)
+
+    val_full = VoxelDataset(cfg.data.val_path, cfg.data)
+    assert len(val_full) == sum(
+        len(VoxelDataset(p, cfg.data)) for p in cfg.data.val_path
+    ), "val was capped by the train-only limit"
 
 
 def test_eval_produces_metrics(tmp_path):
@@ -80,3 +154,58 @@ def test_eval_produces_metrics(tmp_path):
     for key in ("count_accuracy", "t1_rel_median", "t2_rel_median_csf", "t2_rel_median_noncsf"):
         assert key in m
     assert (tmp_path / "run" / "figures" / "scatter_detr.png").exists()
+
+    # per-n is mandatory: an aggregate over uniform n=1..4 averages an easy regime with a
+    # near-impossible one and describes neither.
+    for n in (1, 2, 3, 4):
+        assert f"count_accuracy_n{n}" in m and f"n_voxels_n{n}" in m
+    assert sum(m[f"n_voxels_n{n}"] for n in (1, 2, 3, 4)) == m["n_voxels"]
+
+    # the count-correct conditional block, and the physics checks
+    assert "cc_t1_rel_median" in m and "cc_n_voxels" in m
+    assert "t2_ge_t1_rate" in m and "weight_sum_dev_median" in m
+    assert m["exist_thresh"] == 0.5          # never tuned on the split being reported
+
+
+def test_confusion_matrix_shape_and_totals():
+    """The matrix is deliberately not square: 10 queries means predicted count can be 0..10."""
+    from t1t2.eval import count_confusion
+
+    trues = [[(500.0, 50.0, 1.0)], [(500.0, 50.0, 0.5), (900.0, 90.0, 0.5)]]
+    preds = [[(500.0, 50.0, 1.0)], []]                       # right, then a total miss
+    c = count_confusion(preds, trues, n_queries=10)
+
+    assert c["true_counts"] == [1, 2] and c["predicted_range"] == [0, 10]
+    assert len(c["matrix"]["1"]) == 11
+    assert c["matrix"]["1"][1] == 1                          # true 1 -> predicted 1
+    assert c["matrix"]["2"][0] == 1                          # true 2 -> predicted 0
+    assert sum(sum(row) for row in c["matrix"].values()) == len(trues)
+
+
+def test_physics_violations_are_measured_not_fixed():
+    """Independent sigmoid heads can emit T2 >= T1; we report that rather than clamp it."""
+    from t1t2.eval import physics_violations
+
+    preds = [[(500.0, 900.0, 0.5)],                          # T2 > T1: unphysical; sum(w)=0.5
+             [(500.0, 50.0, 0.4), (900.0, 90.0, 0.4)]]       # fine, but sum(w)=0.8
+    v = physics_violations(preds)
+    assert v["t2_ge_t1_rate"] == 1 / 3                        # 1 of 3 compartments
+    assert abs(v["weight_sum_dev_median"] - 0.35) < 1e-9      # median(|0.5-1|, |0.8-1|) = median(.5,.2)
+
+
+def test_snr_ladder_is_scored_per_rung_and_flags_extrapolation(tmp_path):
+    from t1t2.eval import evaluate_snr_ladder
+
+    cfg = _cfg(epochs=1, batch_size=128)
+    _, _, model = train(cfg, results_dir=tmp_path / "run", limit=128, log=lambda *a: None)
+
+    paths = {f"test_snr{s}": [str(DEV / f"n{n}" / f"test_snr{s}.parquet") for n in range(1, 5)]
+             for s in (20, 150)}
+    out = evaluate_snr_ladder(model, paths, cfg.data, get_device(None),
+                              TargetNormalizer.from_config(cfg.data), tmp_path / "run",
+                              train_snr_min=30.0, limit=64)
+
+    assert out["test_snr20"]["extrapolation"] is True         # below the training range
+    assert out["test_snr150"]["extrapolation"] is False
+    assert out["test_snr20"]["snr"] == 20.0
+    assert (tmp_path / "run" / "metrics_snr_ladder.json").exists()

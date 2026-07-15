@@ -1,27 +1,68 @@
 #!/usr/bin/env bash
-# One-time environment setup on the cluster. Run once on a login node from the repo root:
-#   cd ~/t1t2_training && bash slurm/setup_env.sh
+# One-time cluster environment setup. Run once on a login node, from anywhere:
 #
-# Creates a local venv (.venv) and installs a CUDA-enabled torch plus the project deps.
+#     bash slurm/setup_env.sh
+#
+# Creates .venv, installs a CUDA-matched torch, then the rest of the requirements.
 set -euo pipefail
 
-# --- FILL IN: load your cluster's Python/CUDA modules (see the HPC "How To") -----------------
-# e.g. module load python/3.11  cuda/12.1
-# module load <PYTHON_MODULE>
-# module load <CUDA_MODULE>
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${REPO}"
+VENV="${T1T2_VENV:-${REPO}/.venv}"
 
-# --- CUDA wheel index: match your cluster's CUDA (cu121 shown; check `nvidia-smi`) -----------
-TORCH_CUDA_INDEX="https://download.pytorch.org/whl/cu121"
+PY="${T1T2_PYTHON:-python3.10}"          # THI: Python 3.10
+TORCH_VERSION="2.6.0"
+CUDA_TAG="cu124"                         # THI: CUDA 12.4
 
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+if ! command -v "${PY}" >/dev/null 2>&1; then
+    echo "FATAL: ${PY} not found. Load a Python 3.10 module first, or set T1T2_PYTHON." >&2
+    exit 1
+fi
 
-# CUDA torch first (so the generic requirement doesn't pull a CPU wheel), then the rest.
-pip install torch --index-url "${TORCH_CUDA_INDEX}"
-pip install -r requirements.txt
+echo "==> creating venv at ${VENV} with $(${PY} --version)"
+"${PY}" -m venv "${VENV}"
+# shellcheck disable=SC1091
+source "${VENV}/bin/activate"
+python -m pip install --upgrade pip wheel
+
+# Torch FIRST, from the CUDA-matched index. The order matters: requirements.txt deliberately does
+# not list torch, so nothing afterwards can quietly swap this build for a default one.
+echo "==> installing torch==${TORCH_VERSION}+${CUDA_TAG}"
+python -m pip install "torch==${TORCH_VERSION}" --index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
+
+echo "==> installing the rest"
+python -m pip install -r requirements.txt
+
+# Verify what we ended up with, not what we asked for.
+echo "==> verifying"
+python - <<PY
+import platform, sys
+import numpy, pandas, pyarrow, torch
+
+print(f"python : {platform.python_version()}")
+print(f"numpy  : {numpy.__version__}")
+print(f"pandas : {pandas.__version__}  pyarrow: {pyarrow.__version__}")
+print(f"torch  : {torch.__version__}  (built against cuda {torch.version.cuda})")
+print(f"cuda   : available={torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"gpu    : {torch.cuda.get_device_name(0)}")
+
+problems = []
+if not torch.__version__.startswith("${TORCH_VERSION}"):
+    problems.append(f"torch is {torch.__version__}, expected ${TORCH_VERSION}")
+if torch.version.cuda is None:
+    problems.append("torch has no CUDA build — something replaced the cu124 wheel")
+if numpy.__version__ != "1.26.4":
+    problems.append(f"numpy is {numpy.__version__}, expected 1.26.4 "
+                    "(the generator's reproducibility is pinned to it)")
+if problems:
+    print("\nFAILED:")
+    for p in problems:
+        print("  -", p)
+    sys.exit(1)
+print("\nenvironment OK")
+PY
 
 echo
-echo "env ready. sanity check:"
-python -c "import torch; print('torch', torch.__version__, '| cuda available:', torch.cuda.is_available())"
-echo "activate later with:  source .venv/bin/activate"
+echo "Done. cuda_available=False on a login node is expected — it has no GPU."
+echo "slurm/smoke.slurm is what proves CUDA actually works."

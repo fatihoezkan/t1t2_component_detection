@@ -26,21 +26,33 @@ from voxel_simulator.generate import (  # noqa: E402
     generate_dataset_family,
     smoke_config,
 )
-from voxel_simulator.sampler import T1_RANGE, T2_RANGE  # noqa: E402
+from voxel_simulator.sampler import MAX_COMP, SNR_MAX, SNR_MIN, T1_RANGE, T2_RANGE  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Generate the synthetic T1–T2 voxel dataset family.")
     ap.add_argument("--out-dir", default=str(PROJECT_ROOT / "output" / "data"),
                     help="Directory for the parquet files.")
-    ap.add_argument("--n-train", type=int, default=1_000_000)
-    ap.add_argument("--n-val", type=int, default=100_000)
-    ap.add_argument("--n-test", type=int, default=100_000)
-    ap.add_argument("--n-per-snr", type=int, default=50_000, help="Voxels per fixed-SNR test set.")
-    ap.add_argument("--snr-min", type=float, default=20.0)
-    ap.add_argument("--snr-max", type=float, default=150.0)
+    ap.add_argument("--n-comp", type=int, required=True, choices=range(1, MAX_COMP + 1),
+                    help="Compartments per voxel. Every voxel in this family gets exactly this "
+                         "many; generate one family per count to get an exactly balanced dataset.")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="Base seed for the whole family. A different seed gives an independent "
+                         "dataset (splits stay disjoint either way).")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="Replace existing output files. Off by default so a re-run cannot quietly "
+                         "destroy a dataset that took hours to make.")
+    ap.add_argument("--n-train", type=int, default=250_000)
+    ap.add_argument("--n-val", type=int, default=25_000)
+    ap.add_argument("--n-test", type=int, default=25_000)
+    ap.add_argument("--n-per-snr", type=int, default=12_500, help="Voxels per fixed-SNR test set.")
+    ap.add_argument("--snr-min", type=float, default=SNR_MIN,
+                    help="Lower train-SNR bound (defaults to the sampler's SNR_MIN).")
+    ap.add_argument("--snr-max", type=float, default=SNR_MAX,
+                    help="Upper train-SNR bound (defaults to the sampler's SNR_MAX).")
     ap.add_argument("--snr-ladder", type=float, nargs="+", default=[20, 40, 60, 100, 150],
-                    help="Fixed SNR values to build separate test sets for.")
+                    help="Fixed SNR values to build separate test sets for. Values below --snr-min "
+                         "(e.g. 20) are extrapolation tests and must be reported as such.")
     ap.add_argument("--t1-min", type=float, default=T1_RANGE[0])
     ap.add_argument("--t1-max", type=float, default=T1_RANGE[1])
     ap.add_argument("--t2-min", type=float, default=T2_RANGE[0])
@@ -58,6 +70,9 @@ def main() -> None:
     a = parse_args()
     config = DatasetFamilyConfig(
         out_dir=a.out_dir,
+        n_comp=a.n_comp,
+        seed=a.seed,
+        overwrite=a.overwrite,
         n_train=a.n_train,
         n_val=a.n_val,
         n_test=a.n_test,

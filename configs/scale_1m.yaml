@@ -1,9 +1,11 @@
-name: cluster_baseline
+name: scale_1m
 notes: >
-  Full-scale 64-input baseline for the GPU cluster. Same architecture and log-minmax
-  normalization as configs/baseline.yaml, but pointed at the balanced 1M-voxel data/full_1to4/
-  splits (250k per compartment count) with a GPU-sized batch. Generate data/full_1to4/ first
-  (slurm/gen_data.slurm) and pass the audit notebook before submitting this.
+  Data-scaling arm: the full 1M baseline.
+  Identical to configs/cluster.yaml except for the name and train_limit_per_path, so the only
+  thing that differs between the arms is how much training data they see. Validation and test
+  stay the full sets in every arm, or the arms' best_val numbers would not be comparable.
+  Compare best_val together with total_steps and wall_seconds: the arms differ ~20x in
+  optimizer steps per epoch, so equal-epoch comparisons would compare different things.
 
 data:
   train_path:
@@ -22,7 +24,7 @@ data:
     - data/full_1to4/n3/test.parquet
     - data/full_1to4/n4/test.parquet
   n_inputs: 64
-  train_limit_per_path: null      # the data-scaling arms override this
+  train_limit_per_path: null      # the full 250k per n = 1M
   normalization: log_minmax
   t1_min: 50.0
   t1_max: 4000.0

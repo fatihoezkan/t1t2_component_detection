@@ -32,11 +32,17 @@ class Protocol:
         )
 
 
+"""The vendored protocol file. Module-level so callers (e.g. the dataset manifest) can checksum
+the exact file the data was generated from. __file__-relative, so it does not depend on cwd."""
+DEFAULT_MAT_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "ti_te_dict.mat")
+)
+
+
 def load_protocol(mat_path: str | None = None) -> Protocol:
     """Load TI, TE, TR from ti_te_dict.mat. Preserves the scanner's acquisition order."""
     if mat_path is None:
-        here = os.path.dirname(__file__)
-        mat_path = os.path.normpath(os.path.join(here, "..", "..", "data", "ti_te_dict.mat"))
+        mat_path = DEFAULT_MAT_PATH
 
     d = sio.loadmat(mat_path)
     ti = np.asarray(d["ti"], dtype=np.float64).flatten()
