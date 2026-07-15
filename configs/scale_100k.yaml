@@ -1,0 +1,68 @@
+name: scale_100k
+notes: >
+  Data-scaling arm: 100,000 train voxels (25,000 per compartment count).
+  Identical to configs/cluster.yaml except for the name and train_limit_per_path, so the only
+  thing that differs between the arms is how much training data they see. Validation and test
+  stay the full sets in every arm, or the arms' best_val numbers would not be comparable.
+  Compare best_val together with total_steps and wall_seconds: the arms differ ~20x in
+  optimizer steps per epoch, so equal-epoch comparisons would compare different things.
+
+data:
+  train_path:
+    - data/full_1to4/n1/train.parquet
+    - data/full_1to4/n2/train.parquet
+    - data/full_1to4/n3/train.parquet
+    - data/full_1to4/n4/train.parquet
+  val_path:
+    - data/full_1to4/n1/val.parquet
+    - data/full_1to4/n2/val.parquet
+    - data/full_1to4/n3/val.parquet
+    - data/full_1to4/n4/val.parquet
+  test_path:
+    - data/full_1to4/n1/test.parquet
+    - data/full_1to4/n2/test.parquet
+    - data/full_1to4/n3/test.parquet
+    - data/full_1to4/n4/test.parquet
+  n_inputs: 64
+  train_limit_per_path: 25000   # 25,000 per n x 4 = 100,000 train voxels
+  normalization: log_minmax
+  t1_min: 50.0
+  t1_max: 4000.0
+  t2_min: 5.0
+  t2_max: 3000.0
+  signal_norm: max
+
+model:
+  input_dim: 64
+  hidden_dim: 512
+  fs_dim: 256
+  n_queries: 10
+  n_dlayers: 4
+  n_heads: 4
+  aux_loss: false
+  pretrain_path: null
+  freeze_encoder: false
+
+loss:
+  t1_weight: 1.0
+  t2_weight: 1.0
+  w_weight: 1.0
+  exist_weight: 0.1
+  aux_weight: 1.0
+  signal_consistency: false
+  signal_consistency_weight: 0.0
+  signal_consistency_type: mse
+
+train:
+  epochs: 200           # an upper bound only — early stopping decides when to stop
+  batch_size: 512
+  lr: 1.0e-4            # constant: no scheduler in the first baseline
+  weight_decay: 1.0e-4
+  opt_betas: [0.9, 0.98]
+  early_stopping: true
+  early_stopping_patience: 10
+  early_stopping_min_delta: 1.0e-4
+  device: null          # auto-detect -> cuda on the GPU node
+  seed: 0
+  num_workers: 4
+  ckpt_every: 1
