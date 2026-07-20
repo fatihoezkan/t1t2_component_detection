@@ -1,28 +1,10 @@
 #!/usr/bin/env bash
-# Shared setup for every Slurm job here: find the repo, activate the venv, log the environment.
+# Shared setup for every Slurm job: enter the repo, activate the venv, log the environment.
 #
-# Sourced, not executed:  source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+# Slurm runs submitted scripts from /var/spool, so jobs source this file by its cluster path.
 set -euo pipefail
 
-# --- where is the repo? -----------------------------------------------------------------
-# Deliberately not $SLURM_SUBMIT_DIR: a job that only works when submitted from one directory
-# fails weeks later for a reason nobody remembers. Ask Slurm where the script itself lives.
-resolve_repo() {
-    if [[ -n "${T1T2_REPO:-}" ]]; then                       # explicit override wins
-        echo "${T1T2_REPO}"; return
-    fi
-    local cmd=""
-    if [[ -n "${SLURM_JOB_ID:-}" ]] && command -v scontrol >/dev/null 2>&1; then
-        cmd=$(scontrol show job "${SLURM_JOB_ID}" 2>/dev/null \
-              | tr ' ' '\n' | sed -n 's/^Command=//p' | head -1 | awk '{print $1}')
-    fi
-    if [[ -n "${cmd}" && -f "${cmd}" ]]; then
-        (cd "$(dirname "${cmd}")/.." && pwd); return         # <repo>/slurm/x.slurm -> <repo>
-    fi
-    (cd "$(dirname "${BASH_SOURCE[1]:-$0}")/.." && pwd)      # fall back to this file's location
-}
-
-REPO="$(resolve_repo)"
+REPO="/home/fao8402/t1t2_component_detection"
 cd "${REPO}"
 
 if [[ ! -f "voxel_generator/data/ti_te_dict.mat" ]]; then

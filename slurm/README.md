@@ -111,10 +111,7 @@ resubmit cannot silently blend two experiments.
 ## Notes
 
 - `device` is `null` in the configs → auto-detects **cuda** on the GPU node.
-- Every job sources `slurm/_common.sh`, which finds the repo from the script's own path (**not**
-  `$SLURM_SUBMIT_DIR` — a job that only works when submitted from one directory breaks later for a
-  reason nobody remembers), activates the venv, checks the protocol is present, and logs host,
-  git commit + dirty flag, protocol checksum, python/numpy/torch versions and the GPU name.
+- Every job uses the fixed cluster paths `/home/fao8402/t1t2_component_detection` and
+  `/home/fao8402/venvs/thesis`, checks the protocol, and logs the environment.
 - The 8 CPUs on the training job are for dataloading. Hungarian matching was measured at
   **5.4 µs/voxel** and is not the bottleneck the older note claimed.
-- Override the repo location with `T1T2_REPO` if needed.

@@ -21,7 +21,7 @@
 # A dataset that fails here is cheap to regenerate. A training run built on one that should have
 # failed is not.
 
-source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+source "/home/fao8402/t1t2_component_detection/slurm/_common.sh"
 
 export AUDIT_DATA_ROOT="${AUDIT_DATA_ROOT:-data/baseline_100k}"
 export AUDIT_EXPECT_TRAIN="${AUDIT_EXPECT_TRAIN:-33333}"   # exact per-n size; balance alone is not enough

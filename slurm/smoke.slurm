@@ -20,7 +20,7 @@
 # spending the real allocation; it honors train_limit_per_path rather than projecting against all
 # rows that happen to exist in the parquet files.
 
-source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+source "/home/fao8402/t1t2_component_detection/slurm/_common.sh"
 
 CFG="${1:-configs/cluster.yaml}"
 RUN="${REPO}/results/_smoke"

@@ -27,7 +27,7 @@
 # 8 CPUs is for dataloading, not for Hungarian matching, which was measured not to be the
 # bottleneck. The first run is only configs/cluster.yaml; scaling arms come after it is stable.
 
-source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+source "/home/fao8402/t1t2_component_detection/slurm/_common.sh"
 
 CFG="${1:-configs/cluster.yaml}"
 
