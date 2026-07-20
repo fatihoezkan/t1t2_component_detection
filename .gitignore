@@ -10,3 +10,4 @@ __pycache__/
 .DS_Store
 # The vendored generator's own outputs, if any get created here
 voxel_generator/output/
+/slurm/logs/*.out

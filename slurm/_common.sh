@@ -42,8 +42,6 @@ print(f"numpy      : {numpy.__version__}")
 try:
     import torch
     print(f"torch      : {torch.__version__}  cuda_available={torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"gpu        : {torch.cuda.get_device_name(0)}  (cuda {torch.version.cuda})")
 except ImportError:
     print("torch      : not installed (fine for CPU-only data generation)")
 PY
