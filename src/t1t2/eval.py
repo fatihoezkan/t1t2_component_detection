@@ -156,10 +156,9 @@ def compute_metrics(preds, trues, n_queries=10):
     error filed into the CSF or non-CSF bucket by the true T2. Medians for the relative errors,
     because a few badly-matched outliers would wreck a mean and misrepresent typical behaviour.
 
-    Per-n metrics are not optional decoration. The data is uniform over n_comp=1..4, and the
-    smallest compartment of a 4-compartment voxel sits below the noise floor in most voxels at
-    low SNR — so an aggregate averages an easy regime with a near-impossible one and describes
-    neither. Any claim about quality has to be read per-n.
+    Per-n metrics are not optional decoration. The per-count files deliberately balance easy and
+    hard regimes, so an aggregate can describe neither of them well. Any claim about quality has
+    to be read per-n; the separately generated n=4 family is an even harder stress test.
     """
     pc = np.array([len(p) for p in preds])
     tc = np.array([len(t) for t in trues])

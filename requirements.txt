@@ -1,9 +1,7 @@
 # Runtime deps for the t1t2 package (model/loss/data) + the vendored generator.
 #
-# Torch is deliberately NOT listed here. On the cluster it must come from the CUDA-matched wheel
-# index (slurm/setup_env.sh installs torch==2.6.0+cu124); pinning it here means a later
-# `pip install -r requirements.txt` re-resolves it to the default build and silently replaces the
-# CUDA one. Install torch first, then this file.
+# Torch is deliberately NOT listed here. The cluster environment already provides its CUDA build;
+# listing it here could silently replace that build with a CPU-only one.
 #
 # numpy is pinned exactly: the generator's reproducibility is a claim about a *recorded*
 # environment — NumPy does not guarantee Generator bit streams across versions, and the manifest

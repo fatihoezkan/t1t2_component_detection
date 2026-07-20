@@ -3,7 +3,7 @@
 #SBATCH --partition=debugging
 #SBATCH --qos=debugging
 #SBATCH --account=debugging
-#SBATCH --array=1-4                  # one task per compartment count -> data/full_1to4/n<k>/
+#SBATCH --array=1-3                  # one task per baseline compartment count
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -12,9 +12,8 @@
 #SBATCH --output=slurm/logs/gen_%A_%a.out
 #SBATCH --error=slurm/logs/gen_%A_%a.out
 #
-# Generate the balanced 1M-voxel dataset: 250k train per compartment count, 25k val, 25k test,
-# 12.5k per fixed-SNR rung. One array task per count, so the four run in parallel and a failure
-# costs only one of them.
+# Generate the baseline-sized family: 33,333 train, 3,333 val, 3,333 test and 1,667 per fixed-SNR
+# rung for each of n=1..3. That is 99,999 training voxels and 145,002 artifacts in total.
 #
 #     sbatch slurm/gen_data.slurm
 #
@@ -26,21 +25,21 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 N_COMP="${SLURM_ARRAY_TASK_ID}"
-OUT="${REPO}/data/full_1to4/n${N_COMP}"
+OUT="${REPO}/data/baseline_100k/n${N_COMP}"
 
 echo "generating n_comp=${N_COMP} -> ${OUT}"
 cd "${REPO}/voxel_generator"
 
-# No --overwrite: if the data is already there, stop rather than silently spend two hours
-# replacing a dataset something downstream may already have been audited against.
+# No --overwrite: if the data is already there, stop rather than silently replace
+# a dataset something downstream may already have been audited against.
 srun python run_generator.py \
     --n-comp "${N_COMP}" \
     --seed 0 \
     --out-dir "${OUT}" \
-    --n-train 250000 \
-    --n-val 25000 \
-    --n-test 25000 \
-    --n-per-snr 12500 \
+    --n-train 33333 \
+    --n-val 3333 \
+    --n-test 3333 \
+    --n-per-snr 1667 \
     --snr-ladder 20 40 60 100 150
 
 echo

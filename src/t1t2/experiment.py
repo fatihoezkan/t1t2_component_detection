@@ -12,6 +12,8 @@ import argparse
 import json
 from pathlib import Path
 
+import torch
+
 from .config import load_config
 from .data import TargetNormalizer, VoxelDataset
 from .device import get_device
@@ -30,14 +32,16 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
     )
     # train() hands back the best model, not the final epoch — nothing to reload here.
 
-    vals = [h["val"]["loss"] for h in history if h.get("val")]
-    best_epoch = min(range(len(vals)), key=lambda i: vals[i]) if vals else None
+    # best.pt is the authority: train() selects it using early_stopping_min_delta. Recomputing a
+    # strict minimum from history can report a different epoch from the model actually evaluated.
+    best_path = Path(results_dir) / "checkpoints" / "best.pt"
+    best = torch.load(best_path, map_location="cpu", weights_only=True) if best_path.exists() else None
     summary = {
         "name": cfg.name,
         "epochs_run": len(history),
         "epoch_budget": max_epochs if max_epochs is not None else cfg.train.epochs,
-        "best_epoch": None if best_epoch is None else best_epoch + 1,
-        "best_val": None if best_epoch is None else vals[best_epoch],
+        "best_epoch": None if best is None else int(best["epoch"]) + 1,
+        "best_val": None if best is None else float(best["val"]),
         "early_stopped": len(history) < (max_epochs if max_epochs is not None else cfg.train.epochs),
         # Reported alongside best_val because the data-scaling arms see very different numbers of
         # updates per epoch; comparing them at equal epochs would compare different things.
@@ -74,11 +78,14 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
 
 
 def _train_snr_min(cfg) -> float | None:
-    """The generator's lower training-SNR bound, used only to flag extrapolation rungs."""
+    """Read the training-SNR floor recorded beside the generated data."""
     try:
-        from voxel_simulator.sampler import SNR_MIN
-        return float(SNR_MIN)
-    except Exception:
+        paths = cfg.data.train_path
+        first = paths if isinstance(paths, str) else paths[0]
+        manifest = Path(first).with_name("manifest.json")
+        with open(manifest) as f:
+            return float(json.load(f)["splits"]["train"]["snr_min"])
+    except (OSError, KeyError, TypeError, ValueError):
         return None
 
 

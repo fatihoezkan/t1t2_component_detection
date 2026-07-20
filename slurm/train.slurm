@@ -15,7 +15,6 @@
 # Train + evaluate one experiment on a GPU node.
 #
 #     sbatch slurm/train.slurm                          # configs/cluster.yaml
-#     sbatch slurm/train.slurm configs/scale_200k.yaml  # a data-scaling arm
 #
 # PREREQUISITES — both are gates, not suggestions:
 #   1. slurm/smoke.slurm passed (CUDA works, resume works, the epoch budget fits the wall)
@@ -25,8 +24,8 @@
 # history and early-stopping state intact. Resume refuses to continue if the config or dataset
 # changed, so a resubmit cannot silently blend two experiments.
 #
-# 8 CPUs is for dataloading, not for the Hungarian matching — that was measured at 5.4 us/voxel
-# (~5 s/epoch at 1M), so it is not the bottleneck the older note claimed.
+# 8 CPUs is for dataloading, not for Hungarian matching, which was measured not to be the
+# bottleneck. The first run is only configs/cluster.yaml; scaling arms come after it is stable.
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -45,7 +44,7 @@ from pathlib import Path
 from t1t2.config import load_config
 p = load_config(sys.argv[1]).data.train_path
 p = [p] if isinstance(p, str) else p
-print(Path(p[0]).parent.parent.name)      # data/full_1to4/n1/train.parquet -> full_1to4
+print(Path(p[0]).parent.parent.name)      # data/baseline_100k/n1/train.parquet -> baseline_100k
 PY
 )"
 AUDIT="${REPO}/results/data_audit/${DATA_NAME}/audit_summary.json"

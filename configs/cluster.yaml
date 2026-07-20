@@ -1,28 +1,23 @@
 name: cluster_baseline
 notes: >
-  Full-scale 64-input baseline for the GPU cluster. Same architecture and log-minmax
-  normalization as configs/baseline.yaml, but pointed at the balanced 1M-voxel data/full_1to4/
-  splits (250k per compartment count) with a GPU-sized batch. Generate data/full_1to4/ first
-  (slurm/gen_data.slurm) and pass the audit notebook before submitting this.
+  First GPU-cluster baseline: 64 inputs, n_comp=1..3, and exactly 99,999 balanced training
+  voxels. The generated files are already baseline-sized; no runtime subsampling is used.
 
 data:
   train_path:
-    - data/full_1to4/n1/train.parquet
-    - data/full_1to4/n2/train.parquet
-    - data/full_1to4/n3/train.parquet
-    - data/full_1to4/n4/train.parquet
+    - data/baseline_100k/n1/train.parquet
+    - data/baseline_100k/n2/train.parquet
+    - data/baseline_100k/n3/train.parquet
   val_path:
-    - data/full_1to4/n1/val.parquet
-    - data/full_1to4/n2/val.parquet
-    - data/full_1to4/n3/val.parquet
-    - data/full_1to4/n4/val.parquet
+    - data/baseline_100k/n1/val.parquet
+    - data/baseline_100k/n2/val.parquet
+    - data/baseline_100k/n3/val.parquet
   test_path:
-    - data/full_1to4/n1/test.parquet
-    - data/full_1to4/n2/test.parquet
-    - data/full_1to4/n3/test.parquet
-    - data/full_1to4/n4/test.parquet
+    - data/baseline_100k/n1/test.parquet
+    - data/baseline_100k/n2/test.parquet
+    - data/baseline_100k/n3/test.parquet
   n_inputs: 64
-  train_limit_per_path: null      # the data-scaling arms override this
+  train_limit_per_path: null
   normalization: log_minmax
   t1_min: 50.0
   t1_max: 4000.0

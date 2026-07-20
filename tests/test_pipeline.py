@@ -17,6 +17,7 @@ from t1t2.config import DataConfig, ExperimentConfig, LossConfig, ModelConfig, T
 from t1t2.eval import evaluate_detr
 from t1t2.data import TargetNormalizer, VoxelDataset
 from t1t2.device import get_device
+from t1t2.experiment import run_experiment
 from t1t2.physics import forward_numpy, forward_torch, load_protocol
 from t1t2.train import train
 
@@ -99,6 +100,21 @@ def test_early_stopping_fires_and_returns_the_best_model(tmp_path):
         assert torch.equal(saved[k], v.cpu()), f"returned model differs from best.pt at {k}"
 
 
+def test_experiment_reports_the_checkpoint_it_evaluates(tmp_path):
+    """The summary must name best.pt, not a smaller loss ignored by min_delta."""
+    cfg = _cfg(epochs=3, batch_size=64, early_stopping=True,
+               early_stopping_patience=2, early_stopping_min_delta=10.0)
+    config_path = tmp_path / "config.yaml"
+    cfg.save(config_path)
+    result_dir = tmp_path / "run"
+    summary = run_experiment(config_path, results_dir=result_dir, limit=64,
+                             resume=False, log=lambda *a: None)
+    selected = torch.load(result_dir / "checkpoints" / "best.pt", map_location="cpu")
+    assert summary["best_epoch"] == int(selected["epoch"]) + 1
+    assert summary["best_val"] == float(selected["val"])
+    assert summary["snr_ladder"]["test_snr20"]["extrapolation"] is True
+
+
 def test_early_stopping_needs_a_val_split(tmp_path):
     """Without validation there is nothing to select on, so it must disable itself, not crash."""
     cfg = _cfg(epochs=2, batch_size=128, early_stopping=True, early_stopping_patience=1)
@@ -155,8 +171,7 @@ def test_eval_produces_metrics(tmp_path):
         assert key in m
     assert (tmp_path / "run" / "figures" / "scatter_detr.png").exists()
 
-    # per-n is mandatory: an aggregate over uniform n=1..4 averages an easy regime with a
-    # near-impossible one and describes neither.
+    # Per-n is mandatory: an aggregate across counts averages easy and hard regimes.
     for n in (1, 2, 3, 4):
         assert f"count_accuracy_n{n}" in m and f"n_voxels_n{n}" in m
     assert sum(m[f"n_voxels_n{n}"] for n in (1, 2, 3, 4)) == m["n_voxels"]

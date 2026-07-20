@@ -33,9 +33,9 @@ if [[ ! -f "voxel_generator/data/ti_te_dict.mat" ]]; then
 fi
 
 # --- environment ------------------------------------------------------------------------
-VENV="${T1T2_VENV:-${REPO}/.venv}"
-if [[ ! -d "${VENV}" ]]; then
-    echo "FATAL: no venv at ${VENV} — run slurm/setup_env.sh first" >&2
+VENV="/home/fao8402/venvs/thesis"
+if [[ ! -f "${VENV}/bin/activate" ]]; then
+    echo "FATAL: cluster environment not found at ${VENV}" >&2
     exit 1
 fi
 # shellcheck disable=SC1091

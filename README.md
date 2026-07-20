@@ -1,4 +1,4 @@
-# t1t2_training
+# t1t2_component_detection
 
 A **from-scratch** Detection Transformer (DETR) training codebase for the thesis
 *"Detection Transformer for Microstructure Quantification from T1–T2 Correlation MRI."*
@@ -18,35 +18,37 @@ a **Hungarian-matching** loss scores that set order-independently.
 ## Layout
 
 ```
-t1t2_training/
+t1t2_component_detection/
 ├── voxel_generator/     # vendored snapshot of the data generator (see PROVENANCE.txt)
 ├── data/                # generated parquet splits (gitignored)
-│   └── dev/             #   small split for local smoke: train/val/test + fixed-SNR ladder
-├── src/t1t2/            # the model + training package (this milestone: config/device/data/model/loss)
+│   ├── dev_1to4/        # local data-analysis/smoke family
+│   └── baseline_100k/   # generated on cluster: n1..n3, 99,999 train voxels
+├── src/t1t2/            # model, loss, train, evaluation, and experiment package
 ├── configs/             # experiment YAMLs — a run is fully described by one of these
-├── slurm/               # cluster submit scripts (later milestone)
+├── slurm/               # generate → audit → GPU smoke → train
 ├── results/             # run artifacts: metrics, figures, checkpoints (gitignored)
-└── tests/               # architecture smoke tests (shapes + gradient; no training)
+└── tests/               # architecture, data, training/resume, and evaluation checks
 ```
 
 ## Status (current milestone)
 
-Built and verified: `config` (YAML experiments), `device` (cuda>mps>cpu), `data` (Parquet
-loader + swappable T1/T2 normalization), `model` (`T1T2DETR`), `loss` (`HungarianLoss`),
-`physics` (differentiable IR-MSE forward), and the `train` / `eval` / `experiment` pipeline. A
-small dev dataset is generated under `data/dev/`. **No full training run yet** — that (on the
-GPU cluster) and the Slurm scripts are the next milestones.
+The end-to-end pipeline and Slurm workflow are built and tested. The first cluster baseline is
+deliberately narrow: **64 inputs, n_comp=1..3, 99,999 balanced train voxels**, the inherited DETR
+architecture, constant learning rate, early stopping, and no auxiliary or physics-consistency
+loss. Validation, test and the SNR ladder bring the complete generated family to 145,002 voxels.
+No full GPU training result exists yet.
 
 ## Commands
 
 ```bash
-# regenerate the small dev dataset (from the vendored generator)
-cd voxel_generator && PYTHONPATH=src python run_generator.py \
-    --out-dir ../data/dev --n-train 50000 --n-val 10000 --n-test 10000 --n-per-snr 5000
+# local tests
+PYTHONPATH=src python3 -m pytest tests/ -q
 
-# architecture smoke tests (shapes + gradient flow — does not train)
-cd t1t2_training && PYTHONPATH=src python -m pytest tests/ -q
+# small local baseline (uses data/dev_1to4/n1..n3)
+PYTHONPATH=src python3 -m t1t2.experiment --config configs/baseline.yaml
 ```
+
+For the cluster sequence and exact commands, see [`slurm/README.md`](slurm/README.md).
 
 ## Design notes
 
@@ -58,3 +60,5 @@ cd t1t2_training && PYTHONPATH=src python -m pytest tests/ -q
 - **log-minmax T1/T2 normalization** by default: relaxation times span a decade, so log-space
   spreads them evenly and lets the loss weights all sit near 1.0.
 - Compartment **count** is read off as the number of queries with existence > 0.5.
+- The first baseline excludes `n=4`; adding it is a separate stress-test experiment, not a silent
+  expansion of the required thesis scope.

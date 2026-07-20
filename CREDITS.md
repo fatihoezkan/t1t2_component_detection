@@ -26,8 +26,9 @@ prediction, the input-count ablation, and the real-data feasibility study.
   the base method (Hungarian-matched set prediction with a transformer).
 
 - **Synthetic data generator — `voxel_simulator`** (first-principles IR-MSE forward
-  model + additive Gaussian noise). Vendored into `voxel_generator/`; the exact
-  upstream commit is pinned in `voxel_generator/PROVENANCE.txt` (@ `512fc66`).
+  model + additive Gaussian noise). Vendored from upstream `512fc66`, then extended for
+  fixed-count families, reproducible split streams, paired-SNR tests, and manifests; see
+  `voxel_generator/PROVENANCE.txt`.
 
 ## Original to this repo
 

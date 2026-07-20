@@ -1,27 +1,23 @@
 name: baseline
 notes: >
   First reference experiment. DETR at the fixed 64-input setting with log-minmax target
-  normalization and O(1) loss weights. Paths point at the small dev split (n=1..4, one file per
-  count) for now; swap in the full cluster splits (data/full_1to4/) when training on the GPU.
+  normalization and O(1) loss weights. The required baseline covers n_comp=1..3; n=4 stays
+  outside training as an analysis/stress-test regime. This local config uses the small dev data.
 
 data:
-  # One file per compartment count, combined into a single dataset. Per-n files are what make
-  # the count distribution exactly balanced rather than balanced only in expectation.
+  # One file per baseline compartment count, combined into an exactly balanced dataset.
   train_path:
     - data/dev_1to4/n1/train.parquet
     - data/dev_1to4/n2/train.parquet
     - data/dev_1to4/n3/train.parquet
-    - data/dev_1to4/n4/train.parquet
   val_path:
     - data/dev_1to4/n1/val.parquet
     - data/dev_1to4/n2/val.parquet
     - data/dev_1to4/n3/val.parquet
-    - data/dev_1to4/n4/val.parquet
   test_path:
     - data/dev_1to4/n1/test.parquet
     - data/dev_1to4/n2/test.parquet
     - data/dev_1to4/n3/test.parquet
-    - data/dev_1to4/n4/test.parquet
   n_inputs: 64
   train_limit_per_path: null
   # No max_comp: the compartment-table width is read off the data's columns.

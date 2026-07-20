@@ -16,10 +16,9 @@
 #
 #     sbatch slurm/smoke.slurm
 #
-# The projection is the point. Nobody knows in advance whether 200 epochs of 1M voxels fits in the
-# 24 h budget, and guessing has already been wrong once here: the "Hungarian matching is the
-# bottleneck" story was measured false (5.4 us/voxel, ~5 s/epoch at 1M — the transformer dominates).
-# So measure it on the real GPU, on the real data, before spending the real allocation.
+# The projection is the point. Measure the configured baseline on the real GPU and data before
+# spending the real allocation; it honors train_limit_per_path rather than projecting against all
+# rows that happen to exist in the parquet files.
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -60,12 +59,17 @@ per_epoch = sum(h["seconds"] for h in hist[1:]) / len(hist[1:])
 per_voxel = per_epoch / limit
 
 import pandas as pd
-full = sum(len(pd.read_parquet(p, columns=["n_comp"])) for p in cfg.data.train_path)
-proj_epoch = per_voxel * full
+per_path = cfg.data.train_limit_per_path
+train_voxels = sum(
+    min(len(pd.read_parquet(p, columns=["n_comp"])), per_path)
+    if per_path is not None else len(pd.read_parquet(p, columns=["n_comp"]))
+    for p in cfg.data.train_path
+)
+proj_epoch = per_voxel * train_voxels
 proj_total = proj_epoch * epochs / 3600
 
 print(f"\nmeasured : {per_epoch:.1f} s/epoch at {limit:,} voxels -> {per_voxel*1e6:.1f} us/voxel")
-print(f"full data: {full:,} train voxels")
+print(f"baseline : {train_voxels:,} train voxels")
 print(f"projected: {proj_epoch:.0f} s/epoch, {proj_total:.1f} h for the {epochs}-epoch cap")
 print(f"budget   : 24 h -> {'FITS' if proj_total < 24 else 'DOES NOT FIT'}")
 if proj_total >= 24:

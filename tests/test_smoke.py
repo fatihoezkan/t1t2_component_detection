@@ -36,9 +36,20 @@ def _cfg() -> ExperimentConfig:
 def test_config_roundtrip(tmp_path):
     cfg = load_config(ROOT / "configs" / "baseline.yaml")
     assert cfg.data.n_inputs == 64 and cfg.model.n_queries == 10
+    assert len(cfg.data.train_path) == 3
+    assert all(f"/n{n}/" in p for n, p in enumerate(cfg.data.train_path, start=1))
     p = tmp_path / "c.yaml"
     cfg.save(p)
     assert load_config(p).name == cfg.name
+
+
+def test_cluster_config_is_the_exact_100k_baseline():
+    cfg = load_config(ROOT / "configs" / "cluster.yaml")
+    assert cfg.data.train_limit_per_path is None
+    assert len(cfg.data.train_path) == len(cfg.data.val_path) == len(cfg.data.test_path) == 3
+    assert all("data/baseline_100k/" in p for p in cfg.data.train_path)
+    assert cfg.model.input_dim == cfg.data.n_inputs == 64
+    assert cfg.model.aux_loss is False and cfg.loss.signal_consistency is False
 
 
 def test_normalizer_roundtrip():
@@ -145,7 +156,7 @@ def test_loader_rejects_n_comp_beyond_the_available_slots(tmp_path):
 
 
 def test_multi_path_limit_splits_evenly_across_counts():
-    """A plain head-slice would spend the whole budget on n1 and never show the model an n=4."""
+    """Generic multi-file loading still reaches every supplied count, including stress-test n=4."""
     cfg = _cfg()
     ds = VoxelDataset(cfg.data.train_path, cfg.data, limit=40)
     assert len(ds) == 40
