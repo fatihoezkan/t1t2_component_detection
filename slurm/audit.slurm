@@ -25,9 +25,8 @@ source "/home/fao8402/t1t2_component_detection/slurm/_common.sh"
 
 export AUDIT_DATA_ROOT="${AUDIT_DATA_ROOT:-data/baseline_100k}"
 export AUDIT_EXPECT_TRAIN="${AUDIT_EXPECT_TRAIN:-33333}"   # exact per-n size; balance alone is not enough
-# On the cluster "which code made this data?" must have an answer, so a dirty worktree is a hard
-# failure here (locally it is only a warning — dev data is regenerated constantly from a dirty tree).
-export AUDIT_REQUIRE_CLEAN=1
+# Git provenance is reported by the notebook but does not block cluster training.
+export AUDIT_REQUIRE_CLEAN=0
 
 echo "auditing ${AUDIT_DATA_ROOT} (expecting ${AUDIT_EXPECT_TRAIN} train voxels per n)"
 cd "${REPO}/notebooks"

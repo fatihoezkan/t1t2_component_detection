@@ -3,6 +3,7 @@
 # ti_te_dict.mat — the acquisition protocol the code cannot run without.
 /data/
 /results/
+/slurm/logs/*.out
 # Python noise
 __pycache__/
 *.pyc
