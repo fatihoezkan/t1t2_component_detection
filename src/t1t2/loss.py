@@ -31,6 +31,12 @@ class HungarianLoss(nn.Module):
         self.t2_w = cfg.t2_weight
         self.wt_w = cfg.w_weight
         self.ex_w = cfg.exist_weight
+        self.t1_t2_weighting = getattr(cfg, "t1_t2_weighting", "legacy")
+        if self.t1_t2_weighting not in {"legacy", "signal_fraction", "uniform"}:
+            raise ValueError(
+                "t1_t2_weighting must be legacy|signal_fraction|uniform; "
+                f"got {self.t1_t2_weighting!r}"
+            )
 
     def forward(self, y_pred, y_true, n_comp):
         device = y_pred.device
@@ -52,10 +58,10 @@ class HungarianLoss(nn.Module):
         wt_sq = (p_wt - t_wt) ** 2
 
         cost = self.t1_w * t1_sq + self.t2_w * t2_sq
-        # Scale the T1/T2 cost by the compartment's true weight: fumbling a big, dominant pool
-        # should hurt more than missing a tiny 5% one — it steers the matcher to the
-        # compartments that actually shape the signal.
-        cost = cost * t_wt
+        # In both fraction-weighted modes, a dominant pool matters more to the assignment than a
+        # weak pool. `uniform` exists as an explicit ablation; it is not used by the new run.
+        if self.t1_t2_weighting != "uniform":
+            cost = cost * t_wt
         cost = cost + self.wt_w * wt_sq
         # A confident query (high existence) is cheaper to assign, so real compartments
         # preferentially grab queries that already think they exist.
@@ -82,8 +88,9 @@ class HungarianLoss(nn.Module):
 
         # --- Step 3: regression loss on the matched pairs only ---
         matched_w = y_true[bidx, t, 2]                    # true weight of each matched pair
-        weighted_t1 = t1_sq[bidx, p, t] * matched_w * self.t1_w
-        weighted_t2 = t2_sq[bidx, p, t] * matched_w * self.t2_w
+        fraction = matched_w if self.t1_t2_weighting != "uniform" else torch.ones_like(matched_w)
+        weighted_t1 = t1_sq[bidx, p, t] * fraction * self.t1_w
+        weighted_t2 = t2_sq[bidx, p, t] * fraction * self.t2_w
         weighted_wt = wt_sq[bidx, p, t] * self.wt_w
 
         # --- Step 4: existence classification for *all* queries ---
@@ -106,8 +113,20 @@ class HungarianLoss(nn.Module):
             c = torch.zeros(B, device=device).index_add_(0, bidx, torch.ones_like(vals))
             return s / c.clamp(min=1.0)
 
-        bt1 = _per_voxel_mean(weighted_t1)
-        bt2 = _per_voxel_mean(weighted_t2)
+        def _per_voxel_fraction_mean(vals):
+            """sum(w * error) / sum(w), not sum(w * error) / n_comp."""
+            s = torch.zeros(B, device=device).index_add_(0, bidx, vals)
+            w = torch.zeros(B, device=device).index_add_(0, bidx, matched_w)
+            return s / w.clamp(min=1e-12)
+
+        if self.t1_t2_weighting == "signal_fraction":
+            bt1 = _per_voxel_fraction_mean(weighted_t1)
+            bt2 = _per_voxel_fraction_mean(weighted_t2)
+        else:
+            # `legacy` is the completed baseline's exact reduction; `uniform` is an ordinary
+            # compartment mean. Keeping legacy explicit makes old checkpoints/configs repeatable.
+            bt1 = _per_voxel_mean(weighted_t1)
+            bt2 = _per_voxel_mean(weighted_t2)
         bwt = _per_voxel_mean(weighted_wt)
 
         # Per-voxel total, then averaged over the batch. Individual terms are returned too so

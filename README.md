@@ -25,14 +25,14 @@ t1t2_component_detection/
 │   └── baseline_100k/   # generated on cluster: n1..n3, 99,999 train voxels
 ├── src/t1t2/            # model, loss, train, evaluation, and experiment package
 ├── configs/             # experiment YAMLs — a run is fully described by one of these
-├── slurm/               # generate → audit → GPU smoke → train
+├── slurm/               # cluster data generation and baseline training
 ├── results/             # run artifacts: metrics, figures, checkpoints (gitignored)
 └── tests/               # architecture, data, training/resume, and evaluation checks
 ```
 
 ## Status (current milestone)
 
-The end-to-end pipeline and Slurm workflow are built and tested. The first cluster baseline is
+The training pipeline is ready. The first cluster baseline is
 deliberately narrow: **64 inputs, n_comp=1..3, 99,999 balanced train voxels**, the inherited DETR
 architecture, constant learning rate, early stopping, and no auxiliary or physics-consistency
 loss. Validation, test and the SNR ladder bring the complete generated family to 145,002 voxels.

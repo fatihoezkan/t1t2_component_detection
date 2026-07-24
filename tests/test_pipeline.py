@@ -179,7 +179,18 @@ def test_eval_produces_metrics(tmp_path):
     # the count-correct conditional block, and the physics checks
     assert "cc_t1_rel_median" in m and "cc_n_voxels" in m
     assert "t2_ge_t1_rate" in m and "weight_sum_dev_median" in m
+    assert "parameter_recovery" in m
+    primary = m["parameter_recovery"]["summary"]
+    assert "t1_fraction_weighted_relative_error_matched" in primary
+    assert "t2_fraction_weighted_relative_error_matched" in primary
+    assert "weight_set_l1_error_mean" in primary
     assert m["exist_thresh"] == 0.5          # never tuned on the split being reported
+    for name in (
+        "parameter_scatter_detr.png",
+        "error_vs_signal_fraction_detr.png",
+        "recovery_vs_signal_fraction_detr.png",
+    ):
+        assert (tmp_path / "run" / "figures" / name).exists()
 
 
 def test_confusion_matrix_shape_and_totals():

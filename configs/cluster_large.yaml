@@ -1,0 +1,62 @@
+name: cluster_large
+notes: >
+  Same baseline model and n_comp=1..3 task, trained on 250,000 voxels per count (750,000 total)
+  to measure the effect of training-set size. Results are saved separately under
+  results/cluster_large.
+
+data:
+  train_path:
+    - data/full_1to4/n1/train.parquet
+    - data/full_1to4/n2/train.parquet
+    - data/full_1to4/n3/train.parquet
+  val_path:
+    - data/full_1to4/n1/val.parquet
+    - data/full_1to4/n2/val.parquet
+    - data/full_1to4/n3/val.parquet
+  test_path:
+    - data/full_1to4/n1/test.parquet
+    - data/full_1to4/n2/test.parquet
+    - data/full_1to4/n3/test.parquet
+  n_inputs: 64
+  train_limit_per_path: null
+  normalization: log_minmax
+  t1_min: 50.0
+  t1_max: 4000.0
+  t2_min: 5.0
+  t2_max: 3000.0
+  signal_norm: max
+
+model:
+  input_dim: 64
+  hidden_dim: 512
+  fs_dim: 256
+  n_queries: 10
+  n_dlayers: 4
+  n_heads: 4
+  aux_loss: false
+  pretrain_path: null
+  freeze_encoder: false
+
+loss:
+  t1_weight: 1.0
+  t2_weight: 1.0
+  w_weight: 1.0
+  exist_weight: 0.1
+  aux_weight: 1.0
+  signal_consistency: false
+  signal_consistency_weight: 0.0
+  signal_consistency_type: mse
+
+train:
+  epochs: 200
+  batch_size: 512
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  opt_betas: [0.9, 0.98]
+  early_stopping: true
+  early_stopping_patience: 10
+  early_stopping_min_delta: 1.0e-4
+  device: null
+  seed: 0
+  num_workers: 4
+  ckpt_every: 1

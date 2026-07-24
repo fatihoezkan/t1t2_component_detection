@@ -1,0 +1,32 @@
+name: baseline_final_100k
+notes: >
+  Offline completion pass for the already-trained 99,999-voxel baseline. This does not retrain
+  the model. It selects the existence threshold on validation data and freezes it before test and
+  paired-SNR evaluation.
+
+source:
+  run_config: results/cluster_baseline/config.yaml
+  checkpoint: results/cluster_baseline/checkpoints/best.pt
+  history: results/cluster_baseline/history.json
+  data_audit: results/data_audit/full_1to4/audit_summary.json
+
+output_dir: results/baseline_final_100k
+device: cpu
+batch_size: 512
+
+data:
+  # The larger local families use the identical SeedSequence keys. Their prefixes reproduce the
+  # exact cluster-baseline voxels while avoiding a duplicate 63 MB dataset.
+  family_root: data/full_1to4
+  compartment_counts: [1, 2, 3]
+  expected_base_seed: 0
+  train_snr_min: 30.0
+  val_rows_per_count: 3333
+  test_rows_per_count: 3333
+  snr_rows_per_count: 1667
+  snr_levels: [20, 40, 60, 100, 150]
+
+threshold:
+  min: 0.05
+  max: 0.95
+  steps: 91

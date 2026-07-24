@@ -84,6 +84,11 @@ class LossConfig:
     w_weight: float = 1.0
     exist_weight: float = 0.1
     aux_weight: float = 1.0       # how strongly earlier decoder layers' aux losses ramp in
+    # legacy preserves the completed baseline exactly: it multiplies T1/T2 error by true signal
+    # fraction and then averages over compartment count. signal_fraction uses the intended
+    # per-voxel sum(w * error) / sum(w), so n=2/3 voxels are not down-scaled merely because they
+    # contain more compartments. uniform removes signal-fraction weighting entirely.
+    t1_t2_weighting: str = "legacy"       # legacy | signal_fraction | uniform
 
     signal_consistency: bool = False           # later milestone; loss ignores this for now
     signal_consistency_weight: float = 0.0
@@ -111,6 +116,16 @@ class TrainConfig:
     early_stopping: bool = True
     early_stopping_patience: int = 10
     early_stopping_min_delta: float = 1.0e-4
+    # The completed baseline selects on total_loss. New parameter-first experiments may select
+    # on t1+t2+weight while still training the existence head.
+    selection_metric: str = "total_loss"        # total_loss | parameter_loss
+
+    # Backwards-compatible optimizer controls: old configs stay constant/no clipping.
+    lr_scheduler: str = "constant"              # constant | reduce_on_plateau
+    scheduler_factor: float = 0.5
+    scheduler_patience: int = 8
+    scheduler_min_lr: float = 1.0e-6
+    gradient_clip_norm: Optional[float] = None
 
     device: Optional[str] = None      # None -> auto-detect (see device.py)
     seed: int = 0
@@ -118,6 +133,19 @@ class TrainConfig:
     # Every epoch by default: last.pt carries the history, so a sparser cadence silently drops
     # the epochs since the last write whenever a run resumes.
     ckpt_every: int = 1
+
+
+@dataclass
+class EvaluationConfig:
+    """Held-out reporting and validation-only threshold calibration."""
+
+    # False preserves every historical experiment's fixed 0.5 behavior.
+    calibrate_threshold: bool = False
+    fixed_threshold: float = 0.5
+    threshold_objective: str = "count_accuracy"  # count_accuracy | parameter_set_error
+    threshold_min: float = 0.05
+    threshold_max: float = 0.95
+    threshold_steps: int = 91
 
 
 @dataclass
@@ -129,6 +157,7 @@ class ExperimentConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     notes: str = ""
 
     def to_dict(self) -> dict:
@@ -164,11 +193,13 @@ def from_dict(raw: dict) -> ExperimentConfig:
     if train_raw.get("opt_betas") is not None:
         train_raw["opt_betas"] = tuple(train_raw["opt_betas"])
     train = TrainConfig(**train_raw)
+    evaluation = EvaluationConfig(**raw.get("evaluation", {}))
     return ExperimentConfig(
         name=raw["name"],
         data=data,
         model=model,
         loss=loss,
         train=train,
+        evaluation=evaluation,
         notes=raw.get("notes", ""),
     )

@@ -12,12 +12,20 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from .config import load_config
 from .data import TargetNormalizer, VoxelDataset
 from .device import get_device
-from .eval import evaluate_detr, evaluate_snr_ladder
+from .eval import (
+    calibrate_existence_threshold,
+    detr_query_outputs,
+    evaluate_detr,
+    evaluate_snr_ladder,
+    threshold_calibration_figure,
+    true_compartments,
+)
 from .train import train
 
 
@@ -42,6 +50,14 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
         "epoch_budget": max_epochs if max_epochs is not None else cfg.train.epochs,
         "best_epoch": None if best is None else int(best["epoch"]) + 1,
         "best_val": None if best is None else float(best["val"]),
+        "selection_metric": cfg.train.selection_metric,
+        "best_total_val_loss": (
+            None if best is None else float(best.get("val_loss", best["val"]))
+        ),
+        "best_parameter_val_loss": (
+            None if best is None or "parameter_loss" not in best
+            else float(best["parameter_loss"])
+        ),
         "early_stopped": len(history) < (max_epochs if max_epochs is not None else cfg.train.epochs),
         # Reported alongside best_val because the data-scaling arms see very different numbers of
         # updates per epoch; comparing them at equal epochs would compare different things.
@@ -52,12 +68,51 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
     # Evaluate on the test split (fall back to val, then train, whichever exists).
     test_path = cfg.data.test_path or cfg.data.val_path or cfg.data.train_path
     normalizer = TargetNormalizer.from_config(cfg.data)
-    test_ds = VoxelDataset(test_path, cfg.data, normalizer, limit=limit)
     device = get_device(cfg.train.device)
+    exist_thresh = float(cfg.evaluation.fixed_threshold)
+
+    # Optional validation-only threshold calibration. Historical configs default to false and
+    # therefore retain the exact fixed-0.5 behavior that produced the completed baseline.
+    if cfg.evaluation.calibrate_threshold:
+        if not cfg.data.val_path:
+            raise ValueError("threshold calibration requires data.val_path")
+        val_ds = VoxelDataset(cfg.data.val_path, cfg.data, normalizer, limit=limit)
+        log(
+            f"[{cfg.name}] calibrating existence threshold on validation "
+            f"({len(val_ds)} voxels; objective={cfg.evaluation.threshold_objective})"
+        )
+        query_outputs = detr_query_outputs(model, val_ds, device, normalizer)
+        thresholds = np.linspace(
+            cfg.evaluation.threshold_min,
+            cfg.evaluation.threshold_max,
+            cfg.evaluation.threshold_steps,
+        )
+        calibration = calibrate_existence_threshold(
+            query_outputs,
+            true_compartments(val_ds),
+            thresholds=thresholds,
+            objective=cfg.evaluation.threshold_objective,
+        )
+        exist_thresh = float(calibration["selected_threshold"])
+        with open(Path(results_dir) / "threshold_calibration.json", "w") as f:
+            json.dump(calibration, f, indent=2)
+        threshold_calibration_figure(
+            calibration, Path(results_dir) / "figures" / "threshold_calibration.png"
+        )
+        summary["threshold_calibration"] = {
+            "objective": calibration["objective"],
+            "selected_threshold": exist_thresh,
+            "selected": calibration["selected"],
+            "selection_split": "validation",
+        }
+
+    test_ds = VoxelDataset(test_path, cfg.data, normalizer, limit=limit)
 
     log(f"[{cfg.name}] evaluating DETR on {test_path} ({len(test_ds)} voxels)")
-    summary["detr"] = evaluate_detr(model, test_ds, device, normalizer, results_dir,
-                                    n_queries=cfg.model.n_queries)
+    summary["detr"] = evaluate_detr(
+        model, test_ds, device, normalizer, results_dir,
+        exist_thresh=exist_thresh, n_queries=cfg.model.n_queries,
+    )
 
     # Per-SNR, if the fixed-SNR rungs sit next to the test files. They are a paired set (same
     # voxels, same noise pattern, only the amplitude differs), so differences across rungs are
@@ -68,7 +123,7 @@ def run_experiment(config_path, results_dir=None, max_epochs=None, limit=None,
         summary["snr_ladder"] = evaluate_snr_ladder(
             model, ladder, cfg.data, device, normalizer, results_dir,
             train_snr_min=_train_snr_min(cfg),
-            n_queries=cfg.model.n_queries, limit=limit,
+            exist_thresh=exist_thresh, n_queries=cfg.model.n_queries, limit=limit,
         )
 
     with open(Path(results_dir) / "summary.json", "w") as f:

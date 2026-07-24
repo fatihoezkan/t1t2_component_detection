@@ -20,8 +20,6 @@
 # Writes to the shared home, never /fast_storage — that is node-local, so the training job would
 # land on a different node and find nothing.
 #
-# Then: sbatch slurm/audit.slurm   (no training until the audit is green and read)
-
 source "/home/fao8402/t1t2_component_detection/slurm/_common.sh"
 
 N_COMP="${SLURM_ARRAY_TASK_ID}"

@@ -1,0 +1,80 @@
+name: t1_3500_t2_500_weighted_long
+notes: >
+  Parameter-first retraining experiment on a new 99,999-voxel balanced family. T1 is restricted
+  to 50–3500 ms and T2 to 5–500 ms, with T1>T2 enforced by rejection sampling. T1/T2 losses use
+  the mathematically correct per-voxel sum(w*error)/sum(w). The best checkpoint is selected by
+  validation T1+T2+weight loss; existence remains trained and count accuracy remains a secondary
+  diagnostic. This run has a unique name/data/results path and cannot overwrite the finalized
+  baseline.
+
+data:
+  train_path:
+    - data/t1_3500_t2_500_100k/n1/train.parquet
+    - data/t1_3500_t2_500_100k/n2/train.parquet
+    - data/t1_3500_t2_500_100k/n3/train.parquet
+  val_path:
+    - data/t1_3500_t2_500_100k/n1/val.parquet
+    - data/t1_3500_t2_500_100k/n2/val.parquet
+    - data/t1_3500_t2_500_100k/n3/val.parquet
+  test_path:
+    - data/t1_3500_t2_500_100k/n1/test.parquet
+    - data/t1_3500_t2_500_100k/n2/test.parquet
+    - data/t1_3500_t2_500_100k/n3/test.parquet
+  n_inputs: 64
+  train_limit_per_path: null
+  normalization: log_minmax
+  t1_min: 50.0
+  t1_max: 3500.0
+  t2_min: 5.0
+  t2_max: 500.0
+  signal_norm: max
+
+model:
+  input_dim: 64
+  hidden_dim: 512
+  fs_dim: 256
+  n_queries: 10
+  n_dlayers: 4
+  n_heads: 4
+  aux_loss: false
+  pretrain_path: null
+  freeze_encoder: false
+
+loss:
+  t1_weight: 1.0
+  t2_weight: 1.0
+  w_weight: 1.0
+  exist_weight: 0.1
+  aux_weight: 1.0
+  t1_t2_weighting: signal_fraction
+  signal_consistency: false
+  signal_consistency_weight: 0.0
+  signal_consistency_type: mse
+
+train:
+  epochs: 500
+  batch_size: 512
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  opt_betas: [0.9, 0.98]
+  early_stopping: true
+  early_stopping_patience: 35
+  early_stopping_min_delta: 1.0e-5
+  selection_metric: parameter_loss
+  lr_scheduler: reduce_on_plateau
+  scheduler_factor: 0.5
+  scheduler_patience: 7
+  scheduler_min_lr: 1.0e-6
+  gradient_clip_norm: 1.0
+  device: null
+  seed: 20260724
+  num_workers: 4
+  ckpt_every: 1
+
+evaluation:
+  calibrate_threshold: true
+  fixed_threshold: 0.5
+  threshold_objective: parameter_set_error
+  threshold_min: 0.05
+  threshold_max: 0.95
+  threshold_steps: 91
